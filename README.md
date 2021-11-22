@@ -22,7 +22,7 @@ For the sake of convenience original RFC is mostly preserved.
 
 ## Invoking
 
-* The peer feature flag for the Fiat Hosted Channel is `49356`, we also imply that the channel is resizeable.
+* The peer feature flag for the Fiat Hosted Channel is `52972`, we also imply that the channel is resizeable (feature flag `52974`).
 
 * Hosted channel must be explicitly invoked by Client on reconnection which is different from normal channel reestablish procedure, the rationale is that Client may have normal channels with Host and may not wish to use a hosted one. Once invoked, Host should reply with either `init_hosted_channel` message if no channel exists yet or with `last_cross_signed_state` if it does.
 
