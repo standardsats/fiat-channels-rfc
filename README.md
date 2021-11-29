@@ -162,6 +162,7 @@ For the sake of convenience original RFC is mostly preserved.
   * [`u32`:`block_day`]
   * [`u32`:`local_updates`]
   * [`u32`:`remote_updates`]
+  * [`u64`:`rate`]
   * [`signature`:`local_sig_of_remote`]
   * [`boolean`:`is_terminal`]
   
@@ -170,6 +171,8 @@ For the sake of convenience original RFC is mostly preserved.
 * Local `state_update` contains a _local_ signature of _remote_ view of next `last_cross_signed_state`. Signature is constructed as follows: generate a next local `last_cross_signed_state` with empty signature fields, then invert it (i.e. make a copy with `local_balance_msat` = `remote_balance_msat`, `local_updates` = `remote_updates` and so on), then sign its signature hash.
 
 * In normal channels each peer keeps track of `local_next_htlc_id`/`remote_next_htlc_id` counters which are increased by incoming and outgoing `update_add_htlc` only, in hosted channels each peer keeps track of `local_updates`/`remote_updates` counters which are updated by every incoming and outgoing update message (`update_add_htlc`, `update_fulfill_htlc`, `update_fail_htlc`, `update_fail_malformed_htlc`).
+
+* `rate` is Millisats/USD value. The field is used by client to reconstruct next crossigned state when the message recieved from the host. Host should ignore the field from the client.
 
 * While verifying a signature a drift of 1 blockday is permitted i.e. `abs(local block_day - remote block_day) <= 1`.
 
@@ -204,8 +207,9 @@ Normal operation may be resumed after channel gets `SUSPENDED` by Host sending a
   * [`u64`:`local_balance_msat`]
   * [`u32`:`local_updates`]
   * [`u32`:`remote_updates`]
+  * [`u64`:`rate`]
   * [`signature`:`local_sig_of_remote`]
-  
+
 ## Data format for channel state snapshot
 
 When resolving disputes after a channel got `SUSPENDED` it may be necessary for a Client to manually provide a channel state snapshot which contains last cross signed state along with subsequent updates from both peers, those may include `update_fulfill_htlc` messages with preimages which can be used by Host to manually fulfill outstanding HTLCs. Otherwise  channel snapshot must not contain any other types of secrets.
