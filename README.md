@@ -6,7 +6,7 @@ Notable differences to the original [Hosted channels RFC](https://github.com/sta
 
 * It adds special field into channel state for tracking last exchange rate. Thus, amount of satoshis in the channel and the last rate corresponding to last cross-signed state represent constant _fiat-denominated_ value.
 
-* Fiat channels leverage resizing feature of the HC which helps to tackle sharp downward volatility of Bitcoin exchange rate and preserve purchasing power of the channel user. 
+* Fiat channels leverage resizing feature of the HC which helps to tackle sharp downward volatility of Bitcoin exchange rate and preserve purchasing power of the channel user.
 
 For the sake of convenience original RFC is mostly preserved.
 
@@ -19,6 +19,35 @@ For the sake of convenience original RFC is mostly preserved.
 * Hosted channel ID is deterministic and is always known in advance for every Client/Host pair, it is derived as `sha256(bip69_lexicographical_order(Client node ID, Host node ID))`. This implies that each Client/Host pair may only have one hosted channel between them.
 
 * A notion of _blockday_ is introduced as `current blockchain height / 144` to be used in messages specific to hosted channels, the intention is to ground them in real blockchain timeline.
+
+## Fiat rate
+
+* The Host determines the fiat rate. The current rate of the hosted channel can be changed only when user sends or receivies sats.
+
+* At the creation of the channel with `init_hosted_channel` the Host sets initial rate of the channel.
+
+* The Host adjusts fiat rate of the channel with `rate` field in the `state_update` message. The Host should ignore the rate of `state_update` that arrived from the Client.
+
+There are three scenarios when the Host adjust the fiat rate of the channel.
+
+### Receiving payment
+
+The scenario occurs when `update_add_htlc` message is sent from the Host to the Client. The new rate is calculated as average weighted summ of the old rate and new one:
+```
+newRate = round((old_balance * old_rate + payment_size * new_rate) / (old_balance + payment_size))
+```
+
+Note that `old_rate` and `new_rate` are reverse rates USD/BTC from the `state_update` and current state rates (they are msat/USD). Host places the new rate value inside
+the `state_update` message, signs it and sends it to the Client. The Client restores remote state with the new channel rate, signs it and proceed with their own `state_update`
+message as usual.
+
+### Sending payment
+
+TODO
+
+### Sending with resize
+
+TODO
 
 ## Invoking
 
@@ -47,7 +76,7 @@ For the sake of convenience original RFC is mostly preserved.
   * [`len*byte`:`refund_scriptpubkey`]
   * [`u16`:`len`]
   * [`len*byte`:`secret`]
-  
+
 #### Rationale
 
 * By sending this message Client prompts Host to reveal last cross signed channel state or offer a new hosted channel if none exists for a given Client yet.
@@ -91,7 +120,7 @@ For the sake of convenience original RFC is mostly preserved.
   * [`u32`:`block_day`]
   * [`u64`:`local_balance_msat`]
   * [`u64`:`remote_balance_msat`]
-  * [`u64`:`rate`] 
+  * [`u64`:`rate`]
   * [`u32`:`local_updates`]
   * [`u32`:`remote_updates`]
   * [`u16`:`num_incoming_htlcs`]
@@ -110,7 +139,7 @@ For the sake of convenience original RFC is mostly preserved.
 * If local signature of remote `last_cross_signed_state` is valid but inverted `local_updates`/`remote_updates` numbers from remote `last_cross_signed_state` are higher than `local_updates`/`remote_updates` from local `last_cross_signed_state` then this means that local peer has fallen behind (or completely lost a state). Once this happens local peer must act as follows:
   * First, it must check if remote `last_cross_signed_state` points to one of future channel states which can be re-created locally. To enable this both peers store each local and remote `update_add_htlc`, `update_fulfill_htlc`, `update_fail_htlc`, `update_fail_malformed_htlc` message they send or receive in historic order until new `last_cross_signed_state` is reached. This vector of updates must be traversed with respected local `last_cross_signed_state` message created on each step and then compared against remote `last_cross_signed_state` update numbers. Once a match is found local peer applies it as current state, resolves all updates preceding this state and re-transmits all local updates following this state.
   * Second, if no matching future local `last_cross_signed_state` could be found then this means that local peer has completely lost it, in this case local peer should invert a remote `last_cross_signed_state` and apply it as its current state, then resolve all incoming HTLCs contained in remote `last_cross_signed_state`.
-  
+
 * Local state signature is obtained by creating a sigHash from localy generated `last_cross_signed_state`: `sha256(refund_scriptpubkey + liability_deadline_blockdays + minimal_onchain_refund_amount_satoshis + channel_capacity_msat + initial_client_balance_msat + block_day + local_balance_msat + remote_balance_msat + local_updates + remote_updates + incoming_htlcs + outgoing_htlcs)` and then signing it with `nodeId` private key.
 
 ## Normal operation
@@ -123,7 +152,7 @@ For the sake of convenience original RFC is mostly preserved.
         |       |<---------- state_update (is_terminal=1) ---|       | // B: got your update, anything else incoming?
         |       |----------- state_update (is_terminal=1) -->|       | // A: no other updates for now
         |       |<---------- state_update (is_terminal=1) ---|       | // B: OK, resolving
-        |   A   |<---------- update_fulfill_htlc #1 ---------|   B   | 
+        |   A   |<---------- update_fulfill_htlc #1 ---------|   B   |
         |       |<---------- state_update (is_terminal=0) ---|       |
         |       |----------- state_update (is_terminal=1) -->|       |
         |       |<---------- state_update (is_terminal=1) ---|       |
@@ -131,7 +160,7 @@ For the sake of convenience original RFC is mostly preserved.
         +-------+                                            +-------+
 
         Where B is Host and A is Client
-        
+
         A more involved case with entwined updates, a diagram takes into account that it takes time for messages to get through, but message order is always preserved
 
         +-------+                                                   +-------+
@@ -154,7 +183,7 @@ For the sake of convenience original RFC is mostly preserved.
         +-------+                                                   +-------+
 
         Where B is Host and A is Client
-        
+
 ### The `state_update` Message
 
 1. type: 75529 (`state_update`)
@@ -165,14 +194,14 @@ For the sake of convenience original RFC is mostly preserved.
   * [`u64`:`rate`]
   * [`signature`:`local_sig_of_remote`]
   * [`boolean`:`is_terminal`]
-  
+
 ### Rationale
 
 * Local `state_update` contains a _local_ signature of _remote_ view of next `last_cross_signed_state`. Signature is constructed as follows: generate a next local `last_cross_signed_state` with empty signature fields, then invert it (i.e. make a copy with `local_balance_msat` = `remote_balance_msat`, `local_updates` = `remote_updates` and so on), then sign its signature hash.
 
 * In normal channels each peer keeps track of `local_next_htlc_id`/`remote_next_htlc_id` counters which are increased by incoming and outgoing `update_add_htlc` only, in hosted channels each peer keeps track of `local_updates`/`remote_updates` counters which are updated by every incoming and outgoing update message (`update_add_htlc`, `update_fulfill_htlc`, `update_fail_htlc`, `update_fail_malformed_htlc`).
 
-* `rate` is Millisats/USD value. The field is used by client to reconstruct next crossigned state when the message recieved from the host. Host should ignore the field from the client.
+* `rate` is Millisats/USD value. The field is used by client to reconstruct next crossigned state when the message recieved from the host. Host should ignore the field from the client. See the `Fiat rate` section for more details.
 
 * While verifying a signature a drift of 1 blockday is permitted i.e. `abs(local block_day - remote block_day) <= 1`.
 
@@ -182,13 +211,13 @@ For the sake of convenience original RFC is mostly preserved.
 
 Normal channel operation may be interrupted in a number of ways (incorrect state update numbers, signature, timed out outgoing HTLC etc). Once this happens a peer must put a channel in `SUSPENDED` state and send out an `Error` message. Hosted channel use tagged errors with first two bytes of `Error` message reserved for the following cases:
 
-`0001`: Wrong blockday in a remote message.  
-`0002`: Wrong local signature from remote message.  
-`0003`: Wrong remote signature from remote message.  
-`0005`: Too many `state_update` messages without reaching of new local `last_cross_signed_state` (more than 16 in a row).  
-`0006`: Timed out outgoing HTLC.  
-`0007`: Remote peer has lost all upstream channels and can't resolve in-flight routed HTLCs.  
-`0008`: Hosted channel denied by Host when Client was trying to invoke it.  
+`0001`: Wrong blockday in a remote message.
+`0002`: Wrong local signature from remote message.
+`0003`: Wrong remote signature from remote message.
+`0005`: Too many `state_update` messages without reaching of new local `last_cross_signed_state` (more than 16 in a row).
+`0006`: Timed out outgoing HTLC.
+`0007`: Remote peer has lost all upstream channels and can't resolve in-flight routed HTLCs.
+`0008`: Hosted channel denied by Host when Client was trying to invoke it.
 
 Normal operation may be resumed after channel gets `SUSPENDED` by Host sending a `state_override` message to Client which would erase all previous problematic state and set a new agreed upon balance breakdown. Client must manually accept this message which would send a `state_update` in return. Client's wallet UI/UX must be especially explicit about what is going on in this situation.
 
@@ -223,7 +252,7 @@ When resolving disputes after a channel got `SUSPENDED` it may be necessary for 
   * [`u16`:`num_next_remote_updates`]
   * [`num_next_remote_updates`*[`update_add_htlc`/`update_fulfill_htlc`/`update_fail_htlc`/`update_fail_malformed_htlc`]:`next_remote_updates`]
   * [`last_cross_signed_state`:`last_cross_signed_state`]
-  
+
 
 ## Resolving edge cases
 
